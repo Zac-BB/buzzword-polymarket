@@ -202,7 +202,7 @@ def market_page(req, m):
     if m["status"] in ("open", "locked", "resolved", "cancelled") and m["line"] is not None:
         actual_txt = f'<div class="stat"><span>Actually said</span><b>{m["actual"]}×</b></div>' if m["actual"] is not None else ""
         parts.append(f"""<div class="stats">
-  <div class="stat"><span>Current line</span><b>{fmt_line(m['line'])}</b>{change_badge(m['opening_line'], m['line'])}</div>
+  <div class="stat"><span>{'Current' if m['status'] in ('open','locked') else 'Closing'} line</span><b>{fmt_line(m['line'])}</b>{change_badge(m['opening_line'], m['line'])}</div>
   <div class="stat"><span>Opening line</span><b>{fmt_line(m['opening_line'])}</b></div>
   <div class="stat"><span>Pot</span><b>{pts(pool['total'])}</b></div>
   <div class="stat over"><span>On over</span><b>{pts(pool['over'])}</b></div>
