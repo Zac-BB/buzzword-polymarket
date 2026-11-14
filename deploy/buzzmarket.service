@@ -1,0 +1,17 @@
+# Copy to /etc/systemd/system/buzzmarket.service, edit User/paths, then:
+#   sudo systemctl daemon-reload && sudo systemctl enable --now buzzmarket
+[Unit]
+Description=BuzzMarket buzzword betting
+After=network.target
+
+[Service]
+User=pi
+WorkingDirectory=/home/pi/buzzword-polymarket
+Environment=BUZZ_PORT=8000
+Environment=BUZZ_QUIET=1
+ExecStart=/usr/bin/python3 manage.py serve
+Restart=on-failure
+MemoryMax=150M
+
+[Install]
+WantedBy=multi-user.target
