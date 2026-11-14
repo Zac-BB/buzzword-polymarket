@@ -4,6 +4,7 @@ import json
 import mimetypes
 import os
 import re
+import socket
 import sys
 import traceback
 from http import cookies
@@ -15,6 +16,27 @@ from . import auth, db, market, views
 STATIC_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static")
 SECURE_COOKIES = os.environ.get("BUZZ_SECURE_COOKIES") == "1"
 MAX_BODY = 64 * 1024
+# When the Pi runs its own Wi-Fi hotspot, set this to the Pi's address there
+# (e.g. 10.42.0.1). Any request for another host name -- like the "am I online?"
+# checks phones make when joining Wi-Fi -- is redirected to the join page, so
+# phones pop the app up automatically (captive portal).
+CAPTIVE_HOST = os.environ.get("BUZZ_CAPTIVE_HOST", "").strip()
+
+
+def _own_hosts():
+    name = socket.gethostname().lower()
+    return {CAPTIVE_HOST, "localhost", "127.0.0.1", "::1", name, name + ".local"}
+
+
+def captive_redirect(host_header):
+    """Return a redirect URL if this request is for some other site, else None."""
+    if not CAPTIVE_HOST:
+        return None
+    host = (host_header or "").strip().lower()
+    host = host[1:host.index("]")] if host.startswith("[") and "]" in host else host.rsplit(":", 1)[0]
+    if host in _own_hosts():
+        return None
+    return f"http://{CAPTIVE_HOST}/join"
 
 ROUTES = []
 
@@ -112,6 +134,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def _dispatch(self):
         path = urlsplit(self.path).path
+        target = captive_redirect(self.headers.get("Host"))
+        if target:
+            return self._send(Response("", 302, headers=[("Location", target), ("Cache-Control", "no-store")]))
         if path.startswith("/static/"):
             return self._send(static(path[len("/static/"):]))
         conn = db.connect()
@@ -187,6 +212,12 @@ def _int(v):
 
 
 # ---------------------------------------------------------------- auth routes
+
+@route("GET", "/join", login=False)
+def get_join(req):
+    return Response(views.join_page(req, CAPTIVE_HOST, os.path.isfile(os.path.join(STATIC_DIR, "qr-wifi.svg")),
+                                    os.path.isfile(os.path.join(STATIC_DIR, "qr-site.svg"))))
+
 
 @route("GET", "/login", login=False)
 def get_login(req):

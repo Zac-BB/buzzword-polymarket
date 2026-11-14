@@ -129,3 +129,9 @@ details summary { cursor: pointer; font-weight: 600; }
   th, td { padding: .4rem; }
   .big { font-size: 1.5rem; }
 }
+
+.join { max-width: 640px; margin: 2rem auto; text-align: center; }
+.qrs { display: flex; flex-wrap: wrap; justify-content: center; gap: 1.5rem; margin-top: 1rem; }
+.qrs figure { margin: 0; }
+.qrs img { width: 220px; height: 220px; background: #fff; padding: 10px; border-radius: 10px; }
+.qrs figcaption { color: var(--muted); font-size: .9rem; margin-top: .4rem; }

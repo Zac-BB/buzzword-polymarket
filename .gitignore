@@ -2,3 +2,5 @@ __pycache__/
 *.db
 *.db-wal
 *.db-shm
+static/qr-*.svg
+backups/

@@ -108,6 +108,27 @@ def login_page(req, username=""):
     return layout(req, "Log in", body)
 
 
+def join_page(req, host, has_wifi_qr, has_site_qr):
+    url = f"http://{host}/" if host else "/"
+    qrs = ""
+    if has_wifi_qr:
+        qrs += '<figure><img src="/static/qr-wifi.svg" alt="Wi-Fi QR code"><figcaption>1. Scan to join the Wi-Fi</figcaption></figure>'
+    if has_site_qr:
+        qrs += f'<figure><img src="/static/qr-site.svg" alt="Site QR code"><figcaption>2. Scan to open {e(url)}</figcaption></figure>'
+    who = (f'<p>Logged in as <b>{e(req.user["display_name"])}</b>. <a class="button primary" href="/">Go to markets</a></p>'
+           if req.user else
+           '<p><a class="button primary" href="/login">Log in</a> <a class="button" href="/register">Create account</a></p>')
+    body = f"""<section class="card join">
+  <h1>🐝 Welcome to BuzzMarket</h1>
+  <p>You're on the BuzzMarket Wi-Fi. Bet on how many times the buzzwords get said.</p>
+  {who}
+  <p class="muted small">If this opened in a pop-up window, it may forget your login when it closes.
+  For the best experience open <b>{e(url)}</b> in Safari or Chrome while connected to this Wi-Fi.</p>
+  {f'<div class="qrs">{qrs}</div>' if qrs else ''}
+</section>"""
+    return layout(req, "Join", body, ticker=False)
+
+
 def register_page(req, form=None):
     f = form or {}
     body = f"""

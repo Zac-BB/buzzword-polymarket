@@ -231,6 +231,23 @@ class HttpTests(unittest.TestCase):
         self.assertIn("Sam", self.get(user, "/leaderboard"))
         conn.close()
 
+    def test_captive_portal_redirect(self):
+        import http.client
+        port = self.httpd.server_address[1]
+        server.CAPTIVE_HOST = "127.0.0.1"
+        try:
+            for host, path in [("captive.apple.com", "/hotspot-detect.html"),
+                               ("connectivitycheck.gstatic.com", "/generate_204")]:
+                c = http.client.HTTPConnection("127.0.0.1", port)
+                c.request("GET", path, headers={"Host": host})
+                r = c.getresponse()
+                self.assertEqual((r.status, r.getheader("Location")), (302, "http://127.0.0.1/join"))
+                c.close()
+            html = self.get(self.client(), "/join")  # own address: served, no login needed
+            self.assertIn("Welcome to BuzzMarket", html)
+        finally:
+            server.CAPTIVE_HOST = ""
+
     def test_csrf_required(self):
         admin = self.client()
         self.post(admin, "/login", {"username": "boss", "password": "adminpw"})
