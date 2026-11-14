@@ -1,12 +1,14 @@
 """Tiny server-side SVG charts, so the browser needs no chart library."""
+import math
 import time
 from html import escape
 
 
 def _scale(values, lo_px, hi_px):
     lo, hi = min(values), max(values)
-    if hi - lo < 1e-9:
-        lo, hi = lo - 1, hi + 1
+    if hi - lo < 1:
+        mid = (hi + lo) / 2
+        lo, hi = mid - 1, mid + 1
     pad = (hi - lo) * 0.12
     lo, hi = lo - pad, hi + pad
     return lo, hi, lambda v: hi_px - (v - lo) / (hi - lo) * (hi_px - lo_px)
@@ -54,11 +56,15 @@ def line_chart(points, opening=None, actual=None, width=640, height=240):
     out = [f'<svg class="chart {trend_class(points)}" viewBox="0 0 {width} {height}" '
            f'role="img" aria-label="Line history">']
     # grid + y labels
-    for k in range(5):
-        v = lo + (hi - lo) * k / 4
-        yy = y(v)
-        out.append(f'<line class="grid" x1="{left}" x2="{width - right}" y1="{yy:.1f}" y2="{yy:.1f}"/>')
-        out.append(f'<text class="axis" x="{left - 6}" y="{yy + 4:.1f}" text-anchor="end">{v:.1f}</text>')
+    # Gridlines sit on the real #.5 lines, thinned out if the range is wide.
+    step = max(1, math.ceil((hi - lo) / 6))
+    v = math.floor(lo) + 0.5
+    while v <= hi:
+        if v >= lo:
+            yy = y(v)
+            out.append(f'<line class="grid" x1="{left}" x2="{width - right}" y1="{yy:.1f}" y2="{yy:.1f}"/>')
+            out.append(f'<text class="axis" x="{left - 6}" y="{yy + 4:.1f}" text-anchor="end">{v:g}</text>')
+        v += step
     if opening is not None:
         yy = y(opening)
         out.append(f'<line class="opening" x1="{left}" x2="{width - right}" y1="{yy:.1f}" y2="{yy:.1f}"/>')

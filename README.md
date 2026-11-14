@@ -11,17 +11,19 @@ to install**, no build step, and roughly 20 MB of RAM.
 1. **Suggest**: anyone can suggest a buzzword (and which meeting it's for). Others upvote suggestions.
 2. **Approve**: the admin approves the good ones.
 3. **Opening line**: users you mark as *trusted* submit a blind guess of the count. The median becomes
-   the opening line (a whole number gets +0.5 so the opening line can't tie). You can override it.
-4. **Betting**: players bet OVER or UNDER the current line. Each bet locks in the line it was placed at,
-   then nudges the line up (over) or down (under). While a market is brand new
+   the opening line, rounded to a #.5 (a median of 4 → 4.5). You can override it.
+4. **Betting**: players bet OVER or UNDER the current line. Since we're counting whole occurrences, the
+   line is **always a #.5** (2.5, 3.5, 4.5 …), so a bet can never tie. Each bet locks in the line it was
+   placed at, then adds hidden "pressure" up (over) or down (under). When enough net betting builds up,
+   the line moves a **full step of 1**. The bet box shows roughly how many points would tip it
+   either way. By default, 400 net points move a small line one step; bigger lines move faster. While a market is brand new
    (its first 5 bets), stakes are capped at 100 points so one early bet can't yank the line or hog a
    tiny pot. The scrolling ticker, the sparklines and the
    per-market chart show where the line is heading.
 5. **Lock**: lock betting when the meeting starts.
 6. **Resolve**: enter how many times it was actually said. Every bet is judged against *its own* line.
    All stakes form one pot, and the winners split it in proportion to their stakes (pari-mutuel).
-   A bet whose line exactly equals the count is a push and gets refunded. If nobody wins, everyone is
-   refunded. Cancelling a market refunds every bet.
+   If nobody wins, everyone is refunded. Cancelling a market refunds every bet.
 
 Everyone starts with 1,000 points (you can change this). The leaderboard ranks players by net worth
 (cash plus points in open bets).
@@ -40,7 +42,7 @@ Players can join two ways:
   it later on their account page.
 
 Also under Admin: make users trusted, adjust balances, reset passwords, disable accounts, set the
-max bet, set the early-bet cap (amount and number of bets; 0 turns it off), and set *liquidity* (higher means each bet moves the line less).
+max bet, set the early-bet cap (amount and number of bets; 0 turns it off), and set how many net points it takes to move the line one step.
 
 ## Raspberry Pi setup
 

@@ -6,7 +6,10 @@ How a market works
 2. opening    - admin approves it. Trusted users submit blind guesses of the count.
 3. open       - admin opens betting. The opening line is the median guess
                 (admin may override). Users bet OVER or UNDER the *current* line.
-                Every bet nudges the line: OVER pushes it up, UNDER pushes it down.
+                Lines are always #.5 because we count whole occurrences, so a bet
+                can never tie. Every bet adds hidden "pressure" (OVER up, UNDER
+                down); once the pressure crosses the next whole number the line
+                jumps a full step to the next #.5.
 4. locked     - admin locks betting when the meeting starts.
 5. resolved   - admin enters the real count. Each bet is judged against the line
                 it was placed at. All losing stakes + winning stakes form one pot,
@@ -15,6 +18,7 @@ How a market works
                 everybody is refunded.
    cancelled  - admin can cancel any time before resolving; all bets refunded.
 """
+import math
 import statistics
 
 from . import db
@@ -103,13 +107,16 @@ def submit_guess(conn, market_id, user, guess):
         (market_id, user["id"], guess, db.now()))
 
 
+def snap(value):
+    """Counts are whole numbers, so every line sits on a half: 0.5, 1.5, 2.5 ..."""
+    return max(0, math.floor(value + 1e-9)) + 0.5
+
+
 def suggested_opening_line(conn, market_id):
     rows = conn.execute("SELECT guess FROM guesses WHERE market_id = ?", (market_id,)).fetchall()
     if not rows:
         return None
-    med = statistics.median(r["guess"] for r in rows)
-    # Use a half-point line so the opening line itself can't push.
-    return float(int(med)) + 0.5 if med == int(med) else round(med, 2)
+    return snap(statistics.median(r["guess"] for r in rows))
 
 
 def open_market(conn, market_id, line=None):
@@ -121,23 +128,45 @@ def open_market(conn, market_id, line=None):
         if line is None:
             raise MarketError("No guesses yet - enter an opening line manually.")
     try:
-        line = round(float(line), 2)
+        line = float(line)
     except (TypeError, ValueError):
         raise MarketError("Opening line must be a number.")
     if line < 0:
         raise MarketError("Opening line can't be negative.")
-    conn.execute("UPDATE markets SET status = 'open', opening_line = ?, line = ?, opened_at = ? WHERE id = ?",
-                 (line, line, db.now(), market_id))
+    line = snap(line)
+    # Pressure starts in the middle of the step, so it takes the same push to
+    # move the line up a step as down a step.
+    conn.execute("UPDATE markets SET status = 'open', opening_line = ?, line = ?, pressure = ?, opened_at = ? "
+                 "WHERE id = ?", (line, line, line, db.now(), market_id))
     _record_line(conn, market_id, line)
 
 
 # ---------------------------------------------------------------------- bets
 
+def pressure_per_point(line, liquidity):
+    """'liquidity' = points of net betting it takes to move a small line one full
+    step. Bigger lines move faster (a 20.5 line moves ~5x as easily as a 3.5),
+    since one extra occurrence matters less there."""
+    return max(1.0, line / 4) / max(liquidity, 1)
+
+
 def line_move(line, stake, side, liquidity):
-    """How far the line moves for a bet. Scales with the size of the line so a
-    100-point bet moves a 3.5 line a little and a 40.5 line a bit more."""
-    delta = (stake / max(liquidity, 1)) * max(1.0, line) * 0.5
+    """Change in hidden pressure for a bet."""
+    delta = stake * pressure_per_point(line, liquidity)
     return delta if side == "over" else -delta
+
+
+def points_to_move(m, liquidity):
+    """Rough points needed on each side to tip the line to the next step.
+    Returns {'over': (points, new_line), 'under': (points, new_line) or None}."""
+    p = m["pressure"] if m["pressure"] is not None else m["line"]
+    per = pressure_per_point(m["line"], liquidity)
+    base = math.floor(p + 1e-9)
+    up = math.ceil((base + 1 - p) / per)
+    out = {"over": (max(up, 1), m["line"] + 1), "under": None}
+    if m["line"] > 0.5:
+        out["under"] = (max(math.floor((p - base) / per) + 1, 1), m["line"] - 1)
+    return out
 
 
 def place_bet(conn, market_id, user, side, stake):
@@ -165,8 +194,10 @@ def place_bet(conn, market_id, user, side, stake):
     conn.execute("INSERT INTO bets(market_id, user_id, side, stake, line, created_at) VALUES (?, ?, ?, ?, ?, ?)",
                  (market_id, user["id"], side, stake, line, db.now()))
     _ledger(conn, user["id"], -stake, f"Bet {side.upper()} {line:g} on \"{m['phrase']}\"")
-    new_line = round(max(0.0, line + line_move(line, stake, side, db.get_int_setting(conn, "liquidity"))), 2)
-    conn.execute("UPDATE markets SET line = ? WHERE id = ?", (new_line, market_id))
+    pressure = m["pressure"] if m["pressure"] is not None else line
+    pressure = round(max(0.0, pressure + line_move(line, stake, side, db.get_int_setting(conn, "liquidity"))), 6)
+    new_line = snap(pressure)
+    conn.execute("UPDATE markets SET line = ?, pressure = ? WHERE id = ?", (new_line, pressure, market_id))
     _record_line(conn, market_id, new_line)
     return line, new_line
 

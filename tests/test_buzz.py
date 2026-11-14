@@ -103,6 +103,28 @@ class FlowTests(unittest.TestCase):
         self.assertEqual(self.user(self.t1)["balance"], 900)
         self.assertEqual(len(market.history(c, mid)), 3)
 
+    def test_lines_are_half_points_and_move_whole_steps(self):
+        c = self.conn
+        self.assertEqual([market.snap(x) for x in (0, 3, 3.5, 3.9, 4)], [0.5, 3.5, 3.5, 3.5, 4.5])
+        with db.transaction(c):
+            db.set_setting(c, "liquidity", 200)  # 200 net points = one step on a small line
+            mid = market.suggest(c, self.u, "bandwidth")
+            market.approve(c, mid)
+            market.open_market(c, mid, 3.2)  # admin typed 3.2 -> snapped
+            self.assertEqual(market.get_market(c, mid)["line"], 3.5)
+            joe = self.user(self.u)
+            self.assertEqual(market.place_bet(c, mid, joe, "over", 50), (3.5, 3.5))   # not enough yet
+            self.assertEqual(market.points_to_move(market.get_market(c, mid), 200)["over"], (50, 4.5))
+            self.assertEqual(market.place_bet(c, mid, joe, "over", 50), (3.5, 4.5))   # +100 total -> step up
+            self.assertEqual(market.place_bet(c, mid, joe, "under", 1), (4.5, 3.5))   # just below 4 -> back down
+            for _ in range(8):
+                market.place_bet(c, mid, joe, "under", 100)
+            m = market.get_market(c, mid)
+            self.assertEqual(m["line"], 0.5)          # never below 0.5
+            self.assertIsNone(market.points_to_move(m, 200)["under"])
+            lines = [r["line"] for r in c.execute("SELECT line FROM line_history WHERE market_id = ?", (mid,))]
+            self.assertTrue(all(x % 1 == 0.5 for x in lines), lines)
+
     def test_early_bet_cap(self):
         c = self.conn
         with db.transaction(c):

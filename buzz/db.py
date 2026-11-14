@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS markets (
     status TEXT NOT NULL DEFAULT 'suggested',
     opening_line REAL,
     line REAL,
+    pressure REAL,        -- hidden, continuous; line = floor(pressure) + 0.5
     actual INTEGER,
     created_at REAL NOT NULL,
     opened_at REAL,
@@ -93,8 +94,8 @@ CREATE TABLE IF NOT EXISTS ledger (
 DEFAULT_SETTINGS = {
     "invite_code": "buzzword",
     "starting_balance": "1000",
-    # Bigger = line moves less per point bet.
-    "liquidity": "2000",
+    # Net points of betting needed to move a small line one full step.
+    "liquidity": "400",
     "max_bet": "500",
     # Smaller cap while a market is brand new, so one early bet can't
     # yank the line or dominate a tiny pot. 0 turns it off.
@@ -114,6 +115,10 @@ def connect(path=None):
 
 def init(conn):
     conn.executescript(SCHEMA)
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(markets)")}
+    if "pressure" not in cols:  # upgrade older databases
+        conn.execute("ALTER TABLE markets ADD COLUMN pressure REAL")
+        conn.execute("UPDATE markets SET pressure = line")
     for k, v in DEFAULT_SETTINGS.items():
         conn.execute("INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)", (k, v))
 

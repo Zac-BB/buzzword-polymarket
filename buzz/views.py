@@ -43,7 +43,7 @@ def change_badge(opening, line):
     if abs(d) < 0.005:
         return '<span class="chg flat">±0</span>'
     cls, arrow = ("up", "▲") if d > 0 else ("down", "▼")
-    return f'<span class="chg {cls}">{arrow} {abs(d):.2f}</span>'
+    return f'<span class="chg {cls}">{arrow} {fmt_line(abs(d))}</span>'
 
 
 def status_pill(status):
@@ -165,7 +165,7 @@ def home_page(req):
             action = ""
             if can:
                 action = (f'<form method="post" action="/m/{m["id"]}/guess" class="inline">{csrf_field(req)}'
-                          f'<input name="guess" type="number" step="0.5" min="0" placeholder="your guess" '
+                          f'<input name="guess" type="number" step="1" min="0" placeholder="your guess" '
                           f'value="{e(fmt_line(mine["guess"]) if mine else "")}" required>'
                           f'<button>{"Update" if mine else "Submit"}</button></form>')
             items.append(f'<li><a href="/m/{m["id"]}">“{e(m["phrase"])}”</a> '
@@ -216,6 +216,11 @@ def market_page(req, m):
         early_note = (f'<p class="early">🕐 Just opened: bets are capped at <b>{limit["max"]} pts</b> until '
                       f'{limit["early_bets"]} bets are in ({limit["left"]} to go), so nobody can yank the line early.</p>'
                       if limit["early"] else "")
+        move = market.points_to_move(m, db.get_int_setting(c, "liquidity"))
+        mv = [f'≈{pts(move["over"][0])} pts on <span class="over">over</span> moves it to {fmt_line(move["over"][1])}']
+        if move["under"]:
+            mv.append(f'≈{pts(move["under"][0])} pts on <span class="under">under</span> moves it to {fmt_line(move["under"][1])}')
+        move_note = f'<p class="small">Line moves in whole steps: {"; ".join(mv)}.</p>'
         mult_o = market.estimated_multiplier(pool, "over", 100)
         mult_u = market.estimated_multiplier(pool, "under", 100)
         parts.append(f"""<div class="card betbox">
@@ -228,8 +233,9 @@ def market_page(req, m):
       <button name="side" value="under" class="under">▼ Under {fmt_line(m['line'])}</button>
     </div>
   </form>
-  <p class="muted small">You have {pts(u['balance'])} pts. Your bet locks in the current line, then nudges the line
-  up (over) or down (under) for the next person. Rough payout if you win with 100 pts now:
+  {move_note}
+  <p class="muted small">You have {pts(u['balance'])} pts. Your bet locks in the current line. Bets push the line
+  up (over) or down (under) for the next person, one whole step at a time. Rough payout if you win with 100 pts now:
   over ≈ {mult_o:.2f}×, under ≈ {mult_u:.2f}×.</p>
 </div>""")
     elif m["status"] == "opening":
@@ -239,7 +245,7 @@ def market_page(req, m):
             parts.append(f"""<div class="card"><h2>Set the opening line</h2>
 <p>Blind guess: how many times will this be said? ({n} guesses so far.)</p>
 <form method="post" action="/m/{m['id']}/guess" class="row">{csrf_field(req)}<input type="hidden" name="next" value="/m/{m['id']}">
-<input name="guess" type="number" step="0.5" min="0" value="{e(fmt_line(mine['guess']) if mine else '')}" required>
+<input name="guess" type="number" step="1" min="0" value="{e(fmt_line(mine['guess']) if mine else '')}" required>
 <button class="primary">{'Update guess' if mine else 'Submit guess'}</button></form></div>""")
         else:
             parts.append(f'<div class="card"><p>Trusted users are setting the opening line ({n} guesses so far). '
@@ -383,11 +389,11 @@ def admin_page(req):
             f'<li id="m{m["id"]}"><b>“{e(m["phrase"])}”</b> <span class="muted">{e(m["meeting"])}</span>'
             f'<div class="small">Guesses: {glist}</div>'
             f'<div class="actions"><form method="post" action="/admin/m/{m["id"]}/open" class="inline">{csrf_field(req)}'
-            f'<input name="line" type="number" step="0.01" min="0" placeholder="line" value="{e(fmt_line(sug) if sug is not None else "")}">'
+            f'<input name="line" type="number" step="1" min="0.5" placeholder="e.g. 4.5" value="{e(fmt_line(sug) if sug is not None else "")}">'
             f'<button class="primary">Open betting</button></form>'
             f'{post_button(req, f"/admin/m/{m["id"]}/cancel", "Cancel", "danger", "Cancel this market?")}</div></li>')
     parts.append('<h2>Setting the opening line</h2><p class="muted small">Line defaults to the median guess '
-                 '(whole numbers get +0.5 so the opening line can’t tie). Edit it before opening if you like.</p>'
+                 '(rounded to the #.5 just above it, since counts are whole numbers). Edit it before opening if you like.</p>'
                  + (f'<ul class="list">{"".join(items)}</ul>' if opening else '<p class="muted">None.</p>'))
 
     # Live markets
@@ -414,7 +420,7 @@ def admin_page(req):
 <label>Phrase <input name="phrase" maxlength="80" required></label>
 <label>Meeting <input name="meeting" maxlength="80"></label>
 <label>Notes <textarea name="description" maxlength="300"></textarea></label>
-<label>Opening line (leave blank to let trusted users guess) <input name="line" type="number" step="0.01" min="0"></label>
+<label>Opening line (leave blank to let trusted users guess) <input name="line" type="number" step="1" min="0.5" placeholder="e.g. 4.5"></label>
 <button class="primary">Create</button></form></details>""")
 
     # Users
@@ -455,7 +461,7 @@ def admin_page(req):
 <label>Max bet (0 = no limit) <input name="max_bet" type="number" min="0" value="{e(s['max_bet'])}"></label>
 <label>Early-bet cap: max stake while a market is new (0 = off) <input name="early_max_bet" type="number" min="0" value="{e(s['early_max_bet'])}"></label>
 <label>…applies until this many bets are in <input name="early_bets" type="number" min="0" value="{e(s['early_bets'])}"></label>
-<label>Liquidity (higher = line moves less per bet) <input name="liquidity" type="number" min="1" value="{e(s['liquidity'])}"></label>
+<label>Points to move the line one step (net betting on one side; bigger lines move faster) <input name="liquidity" type="number" min="1" value="{e(s['liquidity'])}"></label>
 <button class="primary">Save settings</button></form>""")
     return layout(req, "Admin", "".join(parts), ticker=False)
 
