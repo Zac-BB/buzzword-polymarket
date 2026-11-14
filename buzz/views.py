@@ -211,13 +211,18 @@ def market_page(req, m):
         parts.append(f'<div class="card chartbox">{charts.line_chart(hist, m["opening_line"], m["actual"])}</div>')
 
     if m["status"] == "open":
+        limit = market.bet_limit(c, m["id"])
+        cap = min(u["balance"], limit["max"]) if limit["max"] else u["balance"]
+        early_note = (f'<p class="early">🕐 Just opened: bets are capped at <b>{limit["max"]} pts</b> until '
+                      f'{limit["early_bets"]} bets are in ({limit["left"]} to go), so nobody can yank the line early.</p>'
+                      if limit["early"] else "")
         mult_o = market.estimated_multiplier(pool, "over", 100)
         mult_u = market.estimated_multiplier(pool, "under", 100)
         parts.append(f"""<div class="card betbox">
   <h2>Place a bet</h2>
   <p>Will <b>“{e(m['phrase'])}”</b> be said more or less than <b class="big">{fmt_line(m['line'])}</b> times?</p>
-  <form method="post" action="/m/{m['id']}/bet">{csrf_field(req)}
-    <label>Stake <input name="stake" type="number" min="1" max="{u['balance']}" value="{min(100, max(u['balance'], 1))}" required></label>
+  {early_note}<form method="post" action="/m/{m['id']}/bet">{csrf_field(req)}
+    <label>Stake <input name="stake" type="number" min="1" max="{max(cap, 1)}" value="{max(min(100, cap), 1)}" required></label>
     <div class="betbtns">
       <button name="side" value="over" class="over">▲ Over {fmt_line(m['line'])}</button>
       <button name="side" value="under" class="under">▼ Under {fmt_line(m['line'])}</button>
@@ -448,6 +453,8 @@ def admin_page(req):
 <input name="invite_code" value="{e(s['invite_code'])}"></label>
 <label>Starting balance for new users <input name="starting_balance" type="number" min="0" value="{e(s['starting_balance'])}"></label>
 <label>Max bet (0 = no limit) <input name="max_bet" type="number" min="0" value="{e(s['max_bet'])}"></label>
+<label>Early-bet cap: max stake while a market is new (0 = off) <input name="early_max_bet" type="number" min="0" value="{e(s['early_max_bet'])}"></label>
+<label>…applies until this many bets are in <input name="early_bets" type="number" min="0" value="{e(s['early_bets'])}"></label>
 <label>Liquidity (higher = line moves less per bet) <input name="liquidity" type="number" min="1" value="{e(s['liquidity'])}"></label>
 <button class="primary">Save settings</button></form>""")
     return layout(req, "Admin", "".join(parts), ticker=False)

@@ -13,7 +13,9 @@ to install**, no build step, and roughly 20 MB of RAM.
 3. **Opening line**: users you mark as *trusted* submit a blind guess of the count. The median becomes
    the opening line (a whole number gets +0.5 so the opening line can't tie). You can override it.
 4. **Betting**: players bet OVER or UNDER the current line. Each bet locks in the line it was placed at,
-   then nudges the line up (over) or down (under). The scrolling ticker, the sparklines and the
+   then nudges the line up (over) or down (under). While a market is brand new
+   (its first 5 bets), stakes are capped at 100 points so one early bet can't yank the line or hog a
+   tiny pot. The scrolling ticker, the sparklines and the
    per-market chart show where the line is heading.
 5. **Lock**: lock betting when the meeting starts.
 6. **Resolve**: enter how many times it was actually said. Every bet is judged against *its own* line.
@@ -38,7 +40,7 @@ Players can join two ways:
   it later on their account page.
 
 Also under Admin: make users trusted, adjust balances, reset passwords, disable accounts, set the
-max bet, and set *liquidity* (higher means each bet moves the line less).
+max bet, set the early-bet cap (amount and number of bets; 0 turns it off), and set *liquidity* (higher means each bet moves the line less).
 
 ## Raspberry Pi setup
 

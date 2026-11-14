@@ -63,6 +63,7 @@ class FlowTests(unittest.TestCase):
             self.t1 = auth.create_user(self.conn, "t1", "T1", "pw1234", is_trusted=True)
             self.t2 = auth.create_user(self.conn, "t2", "T2", "pw1234", is_trusted=True)
             self.u = auth.create_user(self.conn, "joe", "Joe", "pw1234")
+            db.set_setting(self.conn, "early_bets", 0)  # tested separately below
 
     def tearDown(self):
         self.conn.close()
@@ -101,6 +102,29 @@ class FlowTests(unittest.TestCase):
         self.assertEqual(self.user(self.u)["balance"], 1000 - 200 + 300)
         self.assertEqual(self.user(self.t1)["balance"], 900)
         self.assertEqual(len(market.history(c, mid)), 3)
+
+    def test_early_bet_cap(self):
+        c = self.conn
+        with db.transaction(c):
+            db.set_setting(c, "early_bets", 3)
+            db.set_setting(c, "early_max_bet", 100)
+            mid = market.suggest(c, self.u, "align")
+            market.approve(c, mid)
+            market.open_market(c, mid, 3.5)
+            joe = self.user(self.u)
+            with self.assertRaisesRegex(market.MarketError, "just opened"):
+                market.place_bet(c, mid, joe, "over", 101)
+            for _ in range(3):
+                self.assertTrue(market.bet_limit(c, mid)["early"])
+                market.place_bet(c, mid, joe, "over", 100)
+            limit = market.bet_limit(c, mid)
+            self.assertEqual((limit["early"], limit["max"]), (False, 500))
+            market.place_bet(c, mid, joe, "under", 400)
+            db.set_setting(c, "early_max_bet", 0)  # 0 turns it off
+            mid2 = market.suggest(c, self.u, "pivot")
+            market.approve(c, mid2)
+            market.open_market(c, mid2, 1.5)
+            self.assertFalse(market.bet_limit(c, mid2)["early"])
 
     def test_cannot_overbet_and_cancel_refunds(self):
         c = self.conn

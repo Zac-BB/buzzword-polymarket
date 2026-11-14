@@ -108,6 +108,7 @@ svg.spark.flat polyline { stroke: var(--muted); }
 .betbox .betbtns button { flex: 1; padding: .8rem; font-size: 1.05rem; font-weight: 700; color: #fff; border: none; }
 .betbox button.over { background: var(--up); }
 .betbox button.under { background: var(--down); }
+.early { background: #2a2410; border: 1px solid var(--accent); border-radius: 8px; padding: .5rem .8rem; }
 .betbox label { max-width: 220px; }
 
 table { width: 100%; border-collapse: collapse; background: var(--panel); border-radius: 10px; overflow: hidden; }

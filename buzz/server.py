@@ -414,7 +414,8 @@ def post_admin_settings(req):
     f = req.form
     with db.transaction(req.conn):
         db.set_setting(req.conn, "invite_code", f.get("invite_code", "").strip())
-        for k, lo in (("starting_balance", 0), ("max_bet", 0), ("liquidity", 1)):
+        for k, lo in (("starting_balance", 0), ("max_bet", 0), ("liquidity", 1),
+                      ("early_bets", 0), ("early_max_bet", 0)):
             v = _int(f.get(k))
             if v < lo:
                 raise market.MarketError(f"{k} must be at least {lo}.")

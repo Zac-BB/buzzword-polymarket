@@ -96,6 +96,10 @@ DEFAULT_SETTINGS = {
     # Bigger = line moves less per point bet.
     "liquidity": "2000",
     "max_bet": "500",
+    # Smaller cap while a market is brand new, so one early bet can't
+    # yank the line or dominate a tiny pot. 0 turns it off.
+    "early_bets": "5",
+    "early_max_bet": "100",
 }
 
 

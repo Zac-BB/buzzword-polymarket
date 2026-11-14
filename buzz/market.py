@@ -152,9 +152,12 @@ def place_bet(conn, market_id, user, side, stake):
         raise MarketError("Stake must be a whole number.")
     if stake <= 0:
         raise MarketError("Stake must be positive.")
-    max_bet = db.get_int_setting(conn, "max_bet")
-    if max_bet > 0 and stake > max_bet:
-        raise MarketError(f"Max bet is {max_bet} points.")
+    limit = bet_limit(conn, market_id)
+    if limit["max"] and stake > limit["max"]:
+        if limit["early"]:
+            raise MarketError(f"This market just opened: max bet is {limit['max']} points until "
+                              f"{limit['early_bets']} bets are in ({limit['left']} to go).")
+        raise MarketError(f"Max bet is {limit['max']} points.")
     balance = conn.execute("SELECT balance FROM users WHERE id = ?", (user["id"],)).fetchone()["balance"]
     if stake > balance:
         raise MarketError(f"You only have {balance} points.")
@@ -166,6 +169,17 @@ def place_bet(conn, market_id, user, side, stake):
     conn.execute("UPDATE markets SET line = ? WHERE id = ?", (new_line, market_id))
     _record_line(conn, market_id, new_line)
     return line, new_line
+
+
+def bet_limit(conn, market_id):
+    """Current stake cap for a market. 'max' of 0 means no limit."""
+    max_bet = db.get_int_setting(conn, "max_bet")
+    early_bets = db.get_int_setting(conn, "early_bets")
+    early_max = db.get_int_setting(conn, "early_max_bet")
+    n = conn.execute("SELECT COUNT(*) FROM bets WHERE market_id = ?", (market_id,)).fetchone()[0]
+    if early_bets > 0 and early_max > 0 and n < early_bets and (max_bet == 0 or early_max < max_bet):
+        return {"max": early_max, "early": True, "early_bets": early_bets, "left": early_bets - n}
+    return {"max": max_bet, "early": False, "early_bets": early_bets, "left": 0}
 
 
 def lock(conn, market_id):
