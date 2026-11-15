@@ -7,7 +7,7 @@ import re
 import socket
 import sys
 import traceback
-from http import cookies
+from http import HTTPStatus, cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
@@ -74,24 +74,28 @@ def _cookie(name, value, max_age=None):
 
 
 class Request:
-    def __init__(self, handler, conn):
+    """Built from plain pieces so both the built-in server and WSGI can use it.
+    `header(name)` returns a header value or None; `read_body(n)` returns bytes."""
+
+    def __init__(self, conn, method, raw_path, header, read_body, client_ip=""):
         self.conn = conn
-        self.method = handler.command
-        parts = urlsplit(handler.path)
+        self.method = method
+        self.client_ip = client_ip
+        parts = urlsplit(raw_path)
         self.path = unquote(parts.path)
         self.query = {k: v[0] for k, v in parse_qs(parts.query).items()}
         jar = cookies.SimpleCookie()
         try:
-            jar.load(handler.headers.get("Cookie", ""))
+            jar.load(header("Cookie") or "")
         except cookies.CookieError:
             pass
         self.cookies = {k: m.value for k, m in jar.items()}
         self.form = {}
         if self.method == "POST":
-            n = int(handler.headers.get("Content-Length") or 0)
+            n = int(header("Content-Length") or 0)
             if n > MAX_BODY:
                 raise ValueError("Request too large")
-            raw = handler.rfile.read(n).decode("utf-8", "replace")
+            raw = read_body(n).decode("utf-8", "replace")
             self.form = {k: v[0] for k, v in parse_qs(raw, keep_blank_values=True).items()}
         self.token = self.cookies.get("session")
         self.user, self.csrf = auth.load_session(conn, self.token)
@@ -106,7 +110,47 @@ class Request:
         self.user, self.csrf = auth.load_session(self.conn, self.token)
 
 
+SECURITY_HEADERS = [("X-Frame-Options", "DENY"), ("X-Content-Type-Options", "nosniff"),
+                    ("Referrer-Policy", "same-origin")]
+
+
+def process(method, raw_path, header, read_body, client_ip=""):
+    """Handle one request from any server. Returns a Response with all headers set."""
+    resp, clear_flash = _process(method, raw_path, header, read_body, client_ip)
+    if clear_flash:
+        resp.headers.append(("Set-Cookie", _cookie("flash", "", max_age=0)))
+    resp.headers.extend(SECURITY_HEADERS)
+    return resp
+
+
+def _process(method, raw_path, header, read_body, client_ip):
+    if method not in ("GET", "POST", "HEAD"):
+        return Response("Method not allowed", 405, "text/plain"), False
+    if method == "HEAD":
+        method = "GET"
+    target = captive_redirect(header("Host"))
+    if target:
+        return Response("", 302, headers=[("Location", target), ("Cache-Control", "no-store")]), False
+    path = urlsplit(raw_path).path
+    if path.startswith("/static/"):
+        return static(path[len("/static/"):]), False
+    conn = db.connect()
+    try:
+        try:
+            req = Request(conn, method, raw_path, header, read_body, client_ip)
+        except ValueError as ex:
+            return Response(str(ex), 413, "text/plain"), False
+        resp = handle(req)
+        return resp, req.flash is not None and resp.status == 200
+    except Exception:
+        traceback.print_exc()
+        return Response("Something went wrong.", 500, "text/plain"), False
+    finally:
+        conn.close()
+
+
 class Handler(BaseHTTPRequestHandler):
+    """The built-in server (used on the Pi)."""
     server_version = "BuzzMarket"
     protocol_version = "HTTP/1.1"
 
@@ -116,42 +160,41 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         self._dispatch()
 
+    def do_HEAD(self):
+        self._dispatch(head=True)
+
     def log_message(self, fmt, *args):
         if os.environ.get("BUZZ_QUIET") != "1":
             sys.stderr.write("%s - %s\n" % (self.address_string(), fmt % args))
 
-    def _send(self, resp, clear_flash=False):
+    def _dispatch(self, head=False):
+        resp = process(self.command, self.path, self.headers.get, self.rfile.read, self.client_address[0])
         self.send_response(resp.status)
         for k, v in resp.headers:
             self.send_header(k, v)
-        if clear_flash:
-            self.send_header("Set-Cookie", _cookie("flash", "", max_age=0))
         self.send_header("Content-Length", str(len(resp.body)))
-        self.send_header("X-Frame-Options", "DENY")
-        self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
-        self.wfile.write(resp.body)
+        if not head:
+            self.wfile.write(resp.body)
 
-    def _dispatch(self):
-        path = urlsplit(self.path).path
-        target = captive_redirect(self.headers.get("Host"))
-        if target:
-            return self._send(Response("", 302, headers=[("Location", target), ("Cache-Control", "no-store")]))
-        if path.startswith("/static/"):
-            return self._send(static(path[len("/static/"):]))
-        conn = db.connect()
-        try:
-            try:
-                req = Request(self, conn)
-            except ValueError as ex:
-                return self._send(Response(str(ex), 413, "text/plain"))
-            resp = handle(req)
-            self._send(resp, clear_flash=req.flash is not None and resp.status == 200)
-        except Exception:
-            traceback.print_exc()
-            self._send(Response("Something went wrong.", 500, "text/plain"))
-        finally:
-            conn.close()
+
+def wsgi_app(environ, start_response):
+    """Standard Python web interface, for hosts like PythonAnywhere."""
+    def header(name):
+        key = name.upper().replace("-", "_")
+        return environ.get(key if key in ("CONTENT_TYPE", "CONTENT_LENGTH") else "HTTP_" + key)
+
+    raw_path = quote(environ.get("PATH_INFO", "/"), safe="/:@!$&'()*+,;=-._~")
+    if environ.get("QUERY_STRING"):
+        raw_path += "?" + environ["QUERY_STRING"]
+    # Behind a host's proxy the real visitor address arrives in a header.
+    ip = (header("X-Real-IP") or (header("X-Forwarded-For") or "").split(",")[0].strip()
+          or environ.get("REMOTE_ADDR", ""))
+    method = environ.get("REQUEST_METHOD", "GET")
+    resp = process(method, raw_path, header, environ["wsgi.input"].read, ip)
+    headers = resp.headers + [("Content-Length", str(len(resp.body)))]
+    start_response(f"{resp.status} {HTTPStatus(resp.status).phrase}", headers)
+    return [b"" if method == "HEAD" else resp.body]
 
 
 def static(name):
@@ -229,7 +272,7 @@ def get_login(req):
 @route("POST", "/login", login=False)
 def post_login(req):
     try:
-        user = auth.authenticate(req.conn, req.form.get("username"), req.form.get("password"))
+        user = auth.authenticate(req.conn, req.form.get("username"), req.form.get("password"), req.client_ip)
     except auth.AuthError as ex:
         req.flash = ("error", str(ex))
         return Response(views.login_page(req, req.form.get("username", "")), 401)
@@ -252,7 +295,9 @@ def post_register(req):
     try:
         if not code:
             raise auth.AuthError("Self sign-up is turned off. Ask the admin for an account.")
+        auth.IP_THROTTLE.check("ip:" + req.client_ip)
         if not hmac.compare_digest(f.get("invite", "").strip(), code):
+            auth.IP_THROTTLE.fail("ip:" + req.client_ip)
             raise auth.AuthError("Wrong invite code.")
         with db.transaction(req.conn):
             uid = auth.create_user(req.conn, f.get("username"), f.get("display_name"), f.get("password"))

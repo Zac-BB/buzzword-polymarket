@@ -248,6 +248,41 @@ class HttpTests(unittest.TestCase):
         finally:
             server.CAPTIVE_HOST = ""
 
+    def test_wsgi_app(self):
+        from wsgiref.util import setup_testing_defaults
+        import io
+        got = {}
+
+        def call(method, path, body=b"", cookie=""):
+            env = {"REQUEST_METHOD": method, "PATH_INFO": path, "wsgi.input": io.BytesIO(body),
+                   "CONTENT_LENGTH": str(len(body)), "HTTP_COOKIE": cookie,
+                   "CONTENT_TYPE": "application/x-www-form-urlencoded"}
+            setup_testing_defaults(env)
+
+            def start(status, headers):
+                got["status"], got["headers"] = status, headers
+            return b"".join(server.wsgi_app(env, start)).decode()
+
+        self.assertIn("Log in", call("GET", "/login"))
+        self.assertEqual(got["status"], "200 OK")
+        call("POST", "/login", urllib.parse.urlencode({"username": "boss", "password": "adminpw"}).encode())
+        self.assertTrue(got["status"].startswith("303"))
+        session = [v for k, v in got["headers"] if k == "Set-Cookie" and v.startswith("session=")][0]
+        self.assertIn("Markets", call("GET", "/", cookie=session.split(";")[0]))
+        call("GET", "/static/style.css")
+        self.assertEqual(got["status"], "200 OK")
+
+    def test_login_throttle(self):
+        op = self.client()
+        for _ in range(5):
+            with self.assertRaises(urllib.error.HTTPError):
+                self.post(op, "/login", {"username": "victim", "password": "guess"})
+        with self.assertRaises(urllib.error.HTTPError) as cm:
+            self.post(op, "/login", {"username": "victim", "password": "guess"})
+        self.assertIn("Too many failed attempts", cm.exception.read().decode())
+        auth.USER_THROTTLE.fails.clear()
+        auth.IP_THROTTLE.fails.clear()
+
     def test_csrf_required(self):
         admin = self.client()
         self.post(admin, "/login", {"username": "boss", "password": "adminpw"})

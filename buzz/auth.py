@@ -3,6 +3,8 @@ import hashlib
 import hmac
 import re
 import secrets
+import threading
+import time
 
 from . import db
 
@@ -13,6 +15,50 @@ USERNAME_RE = re.compile(r"^[A-Za-z0-9_.-]{2,24}$")
 
 class AuthError(ValueError):
     pass
+
+
+class Throttle:
+    """Blocks a key (a username or IP address) for a while after too many
+    failures, so short handed-out passwords can't be guessed by brute force.
+    Kept in memory: a restart clears it, which is fine for this purpose."""
+
+    def __init__(self, limit, window=15 * 60):
+        self.limit, self.window = limit, window
+        self.fails = {}
+        self.lock = threading.Lock()
+
+    def _recent(self, key, now):
+        times = [t for t in self.fails.get(key, []) if now - t < self.window]
+        if times:
+            self.fails[key] = times
+        else:
+            self.fails.pop(key, None)
+        return times
+
+    def check(self, *keys):
+        now = time.time()
+        with self.lock:
+            for key in keys:
+                times = self._recent(key, now)
+                if len(times) >= self.limit:
+                    wait = int(self.window - (now - times[0])) // 60 + 1
+                    raise AuthError(f"Too many failed attempts. Try again in {wait} minute(s).")
+
+    def fail(self, *keys):
+        now = time.time()
+        with self.lock:
+            if len(self.fails) > 5000:  # keep memory bounded under a flood
+                self.fails.clear()
+            for key in keys:
+                self.fails.setdefault(key, []).append(now)
+
+    def clear(self, key):
+        with self.lock:
+            self.fails.pop(key, None)
+
+
+USER_THROTTLE = Throttle(limit=5)    # wrong passwords per username
+IP_THROTTLE = Throttle(limit=20)     # wrong passwords / invite codes per address
 
 
 def hash_password(password):
@@ -58,10 +104,17 @@ def create_user(conn, username, display_name, password, is_admin=False, is_trust
     return uid
 
 
-def authenticate(conn, username, password):
+def authenticate(conn, username, password, ip=""):
+    ukey = "u:" + (username or "").strip().lower()
+    ikey = "ip:" + ip
+    USER_THROTTLE.check(ukey)
+    IP_THROTTLE.check(ikey)
     row = conn.execute("SELECT * FROM users WHERE username = ?", ((username or "").strip(),)).fetchone()
     if not row or not check_password(password or "", row["pw_hash"]):
+        USER_THROTTLE.fail(ukey)
+        IP_THROTTLE.fail(ikey)
         raise AuthError("Wrong username or password.")
+    USER_THROTTLE.clear(ukey)
     if row["disabled"]:
         raise AuthError("This account is disabled.")
     return row

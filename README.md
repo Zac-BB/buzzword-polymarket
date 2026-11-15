@@ -82,6 +82,45 @@ SSH through an Ethernet cable, not over Wi-Fi.
 Environment variables: `BUZZ_DB` (database path), `BUZZ_PORT`, `BUZZ_HOST`, `BUZZ_CAPTIVE_HOST`
 (the hotspot address; turns on the pop-up redirect), and `BUZZ_SECURE_COOKIES=1` (set this if it's behind HTTPS).
 
+## Hosting online for free (PythonAnywhere)
+
+If you'd rather have a normal website than a Pi hotspot, PythonAnywhere's free plan works. The site is
+`https://YOUR_USERNAME.pythonanywhere.com`, with HTTPS included. Setup takes about 15 minutes, all in the browser.
+
+1. **Sign up** at pythonanywhere.com for a free *Beginner* account. Your username becomes the web address.
+2. **Get the code.** Open *Consoles → Bash* and run:
+   ```bash
+   git clone https://github.com/zac-bb/buzzword-polymarket.git
+   cd buzzword-polymarket
+   python3 manage.py create-admin
+   ```
+   If the repo is private, git asks for a password. Use a GitHub
+   [personal access token](https://github.com/settings/tokens) (read-only access to this repo is enough).
+   Or download the repo as a zip and upload it on the *Files* tab.
+3. **Create the web app.** On the *Web* tab, choose *Add a new web app* → *Manual configuration* → the newest Python 3.
+4. **Point it at the app.** Still on the *Web* tab, click the *WSGI configuration file* link, delete
+   everything in it, and paste this (with your username):
+   ```python
+   import sys
+   sys.path.insert(0, "/home/YOUR_USERNAME/buzzword-polymarket")
+   from wsgi import application
+   ```
+   Save.
+5. **Turn on *Force HTTPS*** on the *Web* tab, then click the green **Reload** button.
+6. Visit `https://YOUR_USERNAME.pythonanywhere.com` and log in. Then, in Admin → Settings,
+   **change the invite code** from `buzzword` before you share the link.
+
+**Keeping it running**
+- Free sites switch off if you don't renew them. About once a month, log in and click
+  *"Run until 1 month from today"* on the *Web* tab. Your data is kept either way.
+- **Update:** in a Bash console, `cd buzzword-polymarket && git pull`, then click *Reload* on the *Web* tab.
+- **Backup:** `python3 manage.py backup` in a Bash console. Download the file from the *Files* tab.
+- If the site errors, the *Web* tab links to an **error log** that shows why.
+
+Online, logins are HTTPS-only. After 5 wrong passwords, a username is locked for 15 minutes. After 20 wrong
+passwords or invite codes, the visitor's address is locked for 15 minutes. If everyone shares one office
+network, a few people mistyping can briefly lock the whole office out of logging in.
+
 ## Tests
 
 ```bash
